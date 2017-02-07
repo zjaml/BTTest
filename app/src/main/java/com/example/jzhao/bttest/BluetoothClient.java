@@ -4,9 +4,7 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
-import android.os.Bundle;
 import android.os.Handler;
-import android.os.Message;
 import android.util.Log;
 
 import java.io.IOException;
@@ -31,8 +29,10 @@ import java.util.UUID;
  * Communication
  * event for data sent/received over the bluetooth chanel
  * Issues:
- * How to detect disconnect?
+ * How to detect disconnect? Is Listening to ACTION_ACL_DISCONNECTED enough? can we do it without it,
+ * only with the state about ConnectedThread?
  * How to control reconnect
+ * -> Limit retry of reconnect to 1 time only for simplicity
  */
 
 public class BluetoothClient {
@@ -41,12 +41,10 @@ public class BluetoothClient {
 
     public static final int STATE_UNPAIRED = 0;
     public static final int STATE_DISCONNECTED = 1;
-    public static final int STATE_CONNECTING = 2;
-    public static final int STATE_CONNECTED = 3;
+    public static final int STATE_CONNECTED = 2;
 
     private final BluetoothAdapter mAdapter;
     private final Handler mHandler;
-    private int mState;
     private ConnectThread mConnectThread;
     private ConnectedThread mConnectedThread;
     private String mTargetDeviceName;
@@ -55,17 +53,6 @@ public class BluetoothClient {
         mAdapter = BluetoothAdapter.getDefaultAdapter();
         mHandler = handler;
         mTargetDeviceName = targetDeviceName;
-    }
-
-    /**
-     * Set the current state of the chat connection
-     *
-     * @param state An integer defining the current connection state
-     */
-    private synchronized void setState(int state) {
-        Log.d(TAG, "setState() " + mState + " -> " + state);
-        mState = state;
-        mHandler.obtainMessage(Constants.MESSAGE_STATE_CHANGE, state, -1).sendToTarget();
     }
 
     /**
@@ -81,41 +68,61 @@ public class BluetoothClient {
 
     /**
      * try connect with the target device.
-     * @return
-     * bluetooth is ready and target device is paired.
+     *
+     * @return when bluetooth is ready and target device is paired, return true and start connecting asynchronously,
+     * otherwise return false to indicate immediate failure.
      */
     public synchronized boolean connect() {
         // try connect if bluetooth is ready and target device is paired.
-        return false;
+        if (mAdapter.getState() != BluetoothAdapter.STATE_ON) {
+            return false;
+        }
+        BluetoothDevice device = getTargetDevice();
+        if (device == null)
+            return false;
+        disconnect();
+        // Start the thread to connect with the given device
+        mConnectThread = new ConnectThread(device);
+        mConnectThread.start();
+        return true;
+    }
+
+    public synchronized void disconnect() {
+        if (mConnectThread != null) {
+            mConnectThread.cancel();
+            mConnectThread = null;
+        }
+        if (mConnectedThread != null) {
+            mConnectedThread.cancel();
+            //todo: send disconnect message to caller
+            mConnectedThread = null;
+        }
+    }
+
+    /**
+     * we don't want write to perform simultaneously which may jam commands.
+     * @param out The bytes to write
+     * @see ConnectedThread#write(byte[])
+     */
+    public synchronized void write(byte[] out) {
+        // Create temporary object
+        ConnectedThread r;
+        if(getState() != STATE_CONNECTED)
+            return;
+        mConnectedThread.write(out);
     }
 
     /**
      * Start the ConnectedThread to begin managing a Bluetooth connection
      *
      * @param socket The BluetoothSocket on which the connection was made
-     * @param device The BluetoothDevice that has been connected
      */
-    public synchronized void connected(
-            BluetoothSocket socket, BluetoothDevice device) {
-        Log.d(TAG, "connected");
-
-        // Cancel the thread that completed the connection
-        if (mConnectThread != null) {
-            mConnectThread.cancel();
-            mConnectThread = null;
-        }
-
-        // Cancel any thread currently running a connection
-        if (mConnectedThread != null) {
-            mConnectedThread.cancel();
-            mConnectedThread = null;
-        }
-
+    public synchronized void startConnectedThread(BluetoothSocket socket) {
+        Log.d(TAG, "startConnectedThread");
+        disconnect();
         // Start the thread to manage the connection and perform transmissions
         mConnectedThread = new ConnectedThread(socket);
         mConnectedThread.start();
-
-        setState(STATE_CONNECTED);
     }
 
     private synchronized BluetoothDevice getTargetDevice() {
@@ -147,6 +154,7 @@ public class BluetoothClient {
                 tmp = device.createRfcommSocketToServiceRecord(SPP_UUID);
             } catch (IOException e) {
                 Log.e(TAG, "attempt to connect to device failed", e);
+                disconnect();
             }
             mmSocket = tmp;
         }
@@ -164,23 +172,18 @@ public class BluetoothClient {
                 mmSocket.connect();
             } catch (IOException e) {
                 // Close the socket
+                Log.e(TAG, "error occurred at connect ", e);
                 try {
                     mmSocket.close();
                 } catch (IOException e2) {
                     Log.e(TAG, "unable to close socket during connection failure", e2);
                 }
-                setState(STATE_DISCONNECTED);
+                disconnect();
                 //TODO: TRY RECONNECT
                 return;
             }
-
-            // Reset the ConnectThread because we're done
-            synchronized (BluetoothClient.this) {
-                mConnectThread = null;
-            }
-
-            // Start the connected thread
-            connected(mmSocket, mmDevice);
+            // Start the startConnectedThread thread
+            startConnectedThread(mmSocket);
         }
 
         public void cancel() {
@@ -202,7 +205,7 @@ public class BluetoothClient {
         private final OutputStream mmOutStream;
 
         public ConnectedThread(BluetoothSocket socket) {
-            Log.d(TAG, "create connected thread");
+            Log.d(TAG, "create startConnectedThread thread");
             mmSocket = socket;
             InputStream tmpIn = null;
             OutputStream tmpOut = null;
@@ -213,8 +216,8 @@ public class BluetoothClient {
                 tmpOut = socket.getOutputStream();
             } catch (IOException e) {
                 Log.e(TAG, "temp sockets not created", e);
+                disconnect();
             }
-
             mmInStream = tmpIn;
             mmOutStream = tmpOut;
         }
@@ -223,39 +226,34 @@ public class BluetoothClient {
             Log.i(TAG, "BEGIN mConnectedThread");
             byte[] buffer = new byte[1024];
             int bytes;
-
-            // Keep listening to the InputStream while connected
-            while (mState == STATE_CONNECTED) {
-                try {
-                    // Read from the InputStream
-                    bytes = mmInStream.read(buffer);
-
-                    // Send the obtained bytes to the UI Activity
-                    mHandler.obtainMessage(Constants.MESSAGE_READ, bytes, -1, buffer)
-                            .sendToTarget();
-                } catch (IOException e) {
-                    Log.e(TAG, "disconnected", e);
-                    setState(STATE_DISCONNECTED);
-                    // TODO: retry connect
-                    break;
-                }
+            try {
+                //todo: decode command from the stream, seperated by \n.
+                // Read from the InputStream
+                bytes = mmInStream.read(buffer);
+                // Send the obtained bytes to the UI Activity
+                mHandler.obtainMessage(Constants.MESSAGE_READ, bytes, -1, buffer)
+                        .sendToTarget();
+            } catch (IOException e) {
+                Log.e(TAG, "disconnected", e);
+                disconnect();
+                // TODO: retry connect
             }
         }
 
         /**
-         * Write to the connected OutStream.
+         * Write to the startConnectedThread OutStream.
          *
          * @param buffer The bytes to write
          */
         public void write(byte[] buffer) {
             try {
                 mmOutStream.write(buffer);
-
                 // Share the sent message back to the UI Activity
                 mHandler.obtainMessage(Constants.MESSAGE_WRITE, -1, -1, buffer)
                         .sendToTarget();
             } catch (IOException e) {
                 Log.e(TAG, "Exception during write", e);
+                disconnect();
             }
         }
 
