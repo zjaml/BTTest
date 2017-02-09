@@ -46,6 +46,7 @@ public class BluetoothClient {
     public static final int STATE_DISCONNECTED = 1;
     public static final int STATE_CONNECTED = 2;
     public static final char DELIMITER = '\n';
+    public static final String US_ASCII = "US-ASCII";
 
     private final BluetoothAdapter mAdapter;
     private final Handler mHandler;
@@ -89,8 +90,11 @@ public class BluetoothClient {
             return false;
         }
         BluetoothDevice device = getTargetDevice();
-        if (device == null)
+        if (device == null) {
+            //todo: report issue here.
+            Log.w(TAG, "not paired with target device" + mTargetDeviceName);
             return false;
+        }
         disconnect();
         // Start the thread to connect with the given device
         mConnectThread = new ConnectThread(device);
@@ -182,7 +186,8 @@ public class BluetoothClient {
             try {
                 // This is a blocking call and will only return on a
                 // successful connection or an exception
-                mmSocket.connect();
+                if(!mmSocket.isConnected())
+                    mmSocket.connect();
             } catch (IOException e) {
                 // Close the socket
                 Log.e(TAG, "error occurred at connect ", e);
@@ -245,17 +250,19 @@ public class BluetoothClient {
             while (isConnected()) {
                 try {
                     // Read from the InputStream
-                    bytes = mmInStream.read(buffer);
-                    String data = new String(buffer, "ASCII");
-                    for (char ch : data.toCharArray()) {
-                        if (ch != DELIMITER) {
-                            mmMessageBuffer.append(ch);
-                        } else {
-                            String message = mmMessageBuffer.toString();
-                            // Send the obtained message to caller
-                            mHandler.obtainMessage(Constants.MESSAGE_INCOMING_MESSAGE, message)
-                                    .sendToTarget();
-                            mmMessageBuffer = new StringBuilder();
+                    if(mmInStream.available() > 0) {
+                        bytes = mmInStream.read(buffer);
+                        String data = new String(buffer, US_ASCII);
+                        for (char ch : data.toCharArray()) {
+                            if (ch != DELIMITER) {
+                                mmMessageBuffer.append(ch);
+                            } else {
+                                String message = mmMessageBuffer.toString();
+                                // Send the obtained message to caller
+                                mHandler.obtainMessage(Constants.MESSAGE_INCOMING_MESSAGE, message)
+                                        .sendToTarget();
+                                mmMessageBuffer = new StringBuilder();
+                            }
                         }
                     }
                 } catch (IOException e) {

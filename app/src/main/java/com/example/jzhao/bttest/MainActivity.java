@@ -4,6 +4,7 @@ import android.os.Handler;
 import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 
 import java.lang.ref.WeakReference;
 
@@ -17,6 +18,8 @@ This activity listens to the message sent by BluetoothClient to get connect/disc
 When trying connect, the activity will retry connect in a interval until it get connected.
  */
 public class MainActivity extends AppCompatActivity {
+
+    public static final String TARGET_DEVICE_NAME = "abc";
 
     //static inner class doesn't hold an implicit reference to the outer class
     private static class MyHandler extends Handler {
@@ -48,16 +51,23 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        mBluetoothClient = new BluetoothClient(this, myHandler, "abc");
+        mBluetoothClient = new BluetoothClient(this, myHandler, TARGET_DEVICE_NAME);
+        mBluetoothClient.connect();
     }
 
     @Override
     protected void onStop() {
         super.onStop();
+        mBluetoothClient.disconnect();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
+        if(mBluetoothClient != null && mBluetoothClient.getState() != BluetoothClient.STATE_CONNECTED) {
+            mBluetoothClient.connect();
+        }
     }
+
+
 }
