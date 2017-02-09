@@ -83,6 +83,9 @@ public class BluetoothClient {
     public synchronized boolean connect() {
         // try connect if bluetooth is ready and target device is paired.
         if (mAdapter.getState() != BluetoothAdapter.STATE_ON) {
+            //try to asynchronously turn on the bluetooth.
+            mAdapter.enable();
+            //todo: report alert here.
             return false;
         }
         BluetoothDevice device = getTargetDevice();
@@ -190,7 +193,6 @@ public class BluetoothClient {
                     Log.e(TAG, "unable to close socket during connection failure", e2);
                 }
                 disconnect();
-                //TODO: TRY RECONNECT
                 return;
             }
             // Start the startConnectedThread thread
@@ -231,6 +233,7 @@ public class BluetoothClient {
             }
             mmInStream = tmpIn;
             mmOutStream = tmpOut;
+            mHandler.obtainMessage(Constants.MESSAGE_CONNECTED).sendToTarget();
         }
 
         public void run() {
@@ -258,7 +261,6 @@ public class BluetoothClient {
                 } catch (IOException e) {
                     Log.e(TAG, "disconnected", e);
                     disconnect();
-                    // TODO: retry connect
                 }
             }
         }
