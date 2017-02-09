@@ -110,12 +110,12 @@ public class BluetoothClient {
     }
 
     /**
-     * we don't want write to perform simultaneously which may jam commands.
+     * we don't want this method to perform simultaneously which may jam commands.
      * convert the command to byte stream, add delimiter and write to the ConnectedThread OutStream.
      * @param command command to send to device
      * @see ConnectedThread#write(byte[])
      */
-    public synchronized void write(String command) {
+    public synchronized void sendCommand(String command) {
         if (getState() != STATE_CONNECTED)
             return;
         command = command + DELIMITER;
@@ -275,7 +275,7 @@ public class BluetoothClient {
             try {
                 mmOutStream.write(buffer);
             } catch (IOException e) {
-                Log.e(TAG, "Exception during write", e);
+                Log.e(TAG, "Exception during sendCommand", e);
                 disconnect();
             }
         }
