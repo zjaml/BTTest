@@ -10,6 +10,7 @@ import android.util.Log;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.Charset;
 import java.util.Set;
 import java.util.UUID;
 
@@ -29,10 +30,12 @@ import java.util.UUID;
  * Communication
  * event for data sent/received over the bluetooth chanel
  * Issues:
- * How to detect disconnect? Is Listening to ACTION_ACL_DISCONNECTED enough? can we do it without it,
- * only with the state about ConnectedThread?
+ * How to detect disconnect? not listening to ACTION_ACL_DISCONNECTED for now. The ConnectedThread is
+ * constantly read from the input stream, so hope it can pickup exception right after disconnected.
+ * <p>
  * How to control reconnect
  * -> Limit retry of reconnect to 1 time only for simplicity
+ * -> When disconnected, this class send message to handler, the caller can then recall the connect method
  */
 
 public class BluetoothClient {
@@ -42,6 +45,7 @@ public class BluetoothClient {
     public static final int STATE_UNPAIRED = 0;
     public static final int STATE_DISCONNECTED = 1;
     public static final int STATE_CONNECTED = 2;
+    public static final char DELIMITER = '\n';
 
     private final BluetoothAdapter mAdapter;
     private final Handler mHandler;
@@ -57,13 +61,17 @@ public class BluetoothClient {
 
     /**
      * Return the current connection state.
+     * TODO: can check the state when the app resumes
      */
     public synchronized int getState() {
         // set state to unpaired when bluetooth is not on
         if (mAdapter.getState() != BluetoothAdapter.STATE_ON) {
             return STATE_UNPAIRED;
         }
-        return mConnectedThread == null ? STATE_DISCONNECTED : STATE_CONNECTED;
+        if (mConnectedThread != null && mConnectedThread.isConnected()) {
+            return STATE_CONNECTED;
+        }
+        return STATE_DISCONNECTED;
     }
 
     /**
@@ -94,22 +102,24 @@ public class BluetoothClient {
         }
         if (mConnectedThread != null) {
             mConnectedThread.cancel();
-            //todo: send disconnect message to caller
+            //send disconnect message to caller, only doing it when it was connected previously, so that
+            //the caller can they try to reconnect as needed.
+            mHandler.obtainMessage(Constants.MESSAGE_DISCONNECTED).sendToTarget();
             mConnectedThread = null;
         }
     }
 
     /**
      * we don't want write to perform simultaneously which may jam commands.
-     * @param out The bytes to write
+     * convert the command to byte stream, add delimiter and write to the ConnectedThread OutStream.
+     * @param command command to send to device
      * @see ConnectedThread#write(byte[])
      */
-    public synchronized void write(byte[] out) {
-        // Create temporary object
-        ConnectedThread r;
-        if(getState() != STATE_CONNECTED)
+    public synchronized void write(String command) {
+        if (getState() != STATE_CONNECTED)
             return;
-        mConnectedThread.write(out);
+        command = command + DELIMITER;
+        mConnectedThread.write(command.getBytes(Charset.forName("US-ASCII")));
     }
 
     /**
@@ -176,6 +186,7 @@ public class BluetoothClient {
                 try {
                     mmSocket.close();
                 } catch (IOException e2) {
+                    //TODO: crash report
                     Log.e(TAG, "unable to close socket during connection failure", e2);
                 }
                 disconnect();
@@ -203,13 +214,13 @@ public class BluetoothClient {
         private final BluetoothSocket mmSocket;
         private final InputStream mmInStream;
         private final OutputStream mmOutStream;
+        private StringBuilder mmMessageBuffer = new StringBuilder();
 
         public ConnectedThread(BluetoothSocket socket) {
             Log.d(TAG, "create startConnectedThread thread");
             mmSocket = socket;
             InputStream tmpIn = null;
             OutputStream tmpOut = null;
-
             // Get the BluetoothSocket input and output streams
             try {
                 tmpIn = socket.getInputStream();
@@ -226,31 +237,43 @@ public class BluetoothClient {
             Log.i(TAG, "BEGIN mConnectedThread");
             byte[] buffer = new byte[1024];
             int bytes;
-            try {
-                //todo: decode command from the stream, seperated by \n.
-                // Read from the InputStream
-                bytes = mmInStream.read(buffer);
-                // Send the obtained bytes to the UI Activity
-                mHandler.obtainMessage(Constants.MESSAGE_READ, bytes, -1, buffer)
-                        .sendToTarget();
-            } catch (IOException e) {
-                Log.e(TAG, "disconnected", e);
-                disconnect();
-                // TODO: retry connect
+
+            // Keep listening to the InputStream while connected
+            while (isConnected()) {
+                try {
+                    // Read from the InputStream
+                    bytes = mmInStream.read(buffer);
+                    String data = new String(buffer, "ASCII");
+                    for (char ch : data.toCharArray()) {
+                        if (ch != DELIMITER) {
+                            mmMessageBuffer.append(ch);
+                        } else {
+                            String message = mmMessageBuffer.toString();
+                            // Send the obtained message to caller
+                            mHandler.obtainMessage(Constants.MESSAGE_INCOMING_MESSAGE, message)
+                                    .sendToTarget();
+                            mmMessageBuffer = new StringBuilder();
+                        }
+                    }
+                } catch (IOException e) {
+                    Log.e(TAG, "disconnected", e);
+                    disconnect();
+                    // TODO: retry connect
+                }
             }
         }
 
+        public boolean isConnected() {
+            return mmSocket != null && mmSocket.isConnected();
+        }
+
         /**
-         * Write to the startConnectedThread OutStream.
-         *
-         * @param buffer The bytes to write
+         * Write bytes buffer to the ConnectedThread OutStream.
+         * @param buffer byte array to send via BT.
          */
         public void write(byte[] buffer) {
             try {
                 mmOutStream.write(buffer);
-                // Share the sent message back to the UI Activity
-                mHandler.obtainMessage(Constants.MESSAGE_WRITE, -1, -1, buffer)
-                        .sendToTarget();
             } catch (IOException e) {
                 Log.e(TAG, "Exception during write", e);
                 disconnect();
