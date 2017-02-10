@@ -25,37 +25,24 @@ public class MainActivity extends AppCompatActivity {
     //static inner class doesn't hold an implicit reference to the outer class
     private static final String TAG = "MainActivity";
 
-    private static class MyHandler extends Handler {
-        //Using a weak reference means you won't prevent garbage collection
-        private final WeakReference<MainActivity> mainActivityWeakReference;
-
-        MyHandler(MainActivity mainActivity) {
-            mainActivityWeakReference = new WeakReference<>(mainActivity);
-        }
-
+    private BluetoothClient mBluetoothClient = null;
+    private final Handler mHandler = new Handler() {
         @Override
         public void handleMessage(Message msg) {
-            MainActivity mainActivity = mainActivityWeakReference.get();
-            if (mainActivity == null) {
-                //TODO: crash report
-                Log.w(TAG, "reference of MainActivity is lost when handle message:" + msg.what);
-                return;
-            }
             switch (msg.what) {
                 case Constants.MESSAGE_CONNECTION_LOST:
                     //TODO: crash report
                     Log.w(TAG, "Bluetooth Connection Lost!");
                     // reconnect since connection is lost
-                    mainActivity.mBluetoothClient.connect();
+                    if (mBluetoothClient != null) {
+                        mBluetoothClient.connect();
+                    }
                     break;
                 case Constants.MESSAGE_INCOMING_MESSAGE:
                     break;
             }
         }
-    }
-
-    private BluetoothClient mBluetoothClient = null;
-    private final MyHandler myHandler = new MyHandler(this);
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,7 +53,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        mBluetoothClient = new BluetoothClient(myHandler, TARGET_DEVICE_NAME);
+        mBluetoothClient = new BluetoothClient(mHandler, TARGET_DEVICE_NAME);
         //will this work without retry? will the Socket.connect block on when remote device is not in range?
         mBluetoothClient.connect();
         mBluetoothClient.getBluetoothBroadcastReceiver()
