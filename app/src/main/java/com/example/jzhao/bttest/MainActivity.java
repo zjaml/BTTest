@@ -17,9 +17,9 @@ The BluetoothClient instance is created at OnCreate, at OnResume, check the conn
 This activity listens to the message sent by BluetoothClient to get connect/disconnect event and get messages received from the remote device.
 When trying connect, the activity will retry connect in a interval until retry limit is reached.
  */
+//todo: listen to bluetooth state change event and connect bluetooth client when bluetooth get switched on
 public class MainActivity extends AppCompatActivity {
-
-    public static final String TARGET_DEVICE_NAME = "vivo X7";
+    public static final String TARGET_DEVICE_NAME = "Nexus 7";
     //static inner class doesn't hold an implicit reference to the outer class
     private static class MyHandler extends Handler {
         //Using a weak reference means you won't prevent garbage collection
@@ -65,9 +65,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-//        if(mBluetoothClient != null && mBluetoothClient.getState() != BluetoothClient.STATE_CONNECTED) {
-//            mBluetoothClient.connect();
-//        }
+        if(mBluetoothClient != null && mBluetoothClient.getState() != BluetoothClient.STATE_CONNECTED) {
+            mBluetoothClient.connect();
+        }
     }
 
 

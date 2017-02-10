@@ -66,6 +66,8 @@ public class BluetoothClient {
      * Return the current connection state.
      * TODO: can check the state when the app resumes
      */
+    // TODO: define and set state machine so that operations can be controlled base on state,
+    // like preventing duplicated connect thread when there's already a connect thread working.
     public synchronized int getState() {
         // set state to unpaired when bluetooth is not on
         if (mAdapter.getState() != BluetoothAdapter.STATE_ON) {
@@ -185,6 +187,7 @@ public class BluetoothClient {
             mAdapter.cancelDiscovery();
 
             // Make a connection to the BluetoothSocket
+            // todo: connect in a loop until it get connected
             try {
                 // This is a blocking call and will only return on a
                 // successful connection or an exception
@@ -198,13 +201,13 @@ public class BluetoothClient {
                     //TODO: crash report
                     Log.e(TAG, "unable to close socket during connection failure", e2);
                 }
-                disconnect();
                 return;
             }
             // Start the startConnectedThread thread
             startConnectedThread(mmSocket);
         }
 
+        //signal the connecting loop to stop
         public void cancel() {
             try {
                 mmSocket.close();
