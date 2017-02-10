@@ -23,8 +23,9 @@ When trying connect, the activity will retry connect in a interval until retry l
 public class MainActivity extends AppCompatActivity {
     public static final String TARGET_DEVICE_NAME = "Nexus 7";
     //static inner class doesn't hold an implicit reference to the outer class
+    private static final String TAG = "MainActivity";
+
     private static class MyHandler extends Handler {
-        private static final String TAG = "MainActivity";
         //Using a weak reference means you won't prevent garbage collection
         private final WeakReference<MainActivity> mainActivityWeakReference;
 
@@ -34,16 +35,21 @@ public class MainActivity extends AppCompatActivity {
 
         @Override
         public void handleMessage(Message msg) {
-            switch (msg.what){
-                case Constants.MESSAGE_STATE_CHANGE:
-                    Log.d(TAG, "State Changed: " + msg.obj);
+            MainActivity mainActivity = mainActivityWeakReference.get();
+            if (mainActivity == null) {
+                //TODO: crash report
+                Log.w(TAG, "reference of MainActivity is lost when handle message:" + msg.what);
+                return;
+            }
+            switch (msg.what) {
+                case Constants.MESSAGE_CONNECTION_LOST:
+                    //TODO: crash report
+                    Log.w(TAG, "Bluetooth Connection Lost!");
+                    // reconnect since connection is lost
+                    mainActivity.mBluetoothClient.connect();
                     break;
                 case Constants.MESSAGE_INCOMING_MESSAGE:
                     break;
-            }
-            MainActivity mainActivity = mainActivityWeakReference.get();
-            if (mainActivity != null) {
-//                ...do work here...
             }
         }
     }
@@ -60,7 +66,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
-        Log.d("MainActivity", "onStart");
         mBluetoothClient = new BluetoothClient(myHandler, TARGET_DEVICE_NAME);
         //will this work without retry? will the Socket.connect block on when remote device is not in range?
         mBluetoothClient.connect();
@@ -71,7 +76,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
-        Log.d("MainActivity", "onStop");
         //important to purge mBluetoothClient here as it cannot maintain correct state while the app get into background.
         //it must be recreated at onStart()
         mBluetoothClient.disconnect();
@@ -80,15 +84,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-    }
-
-    @Override
     protected void onResume() {
         super.onResume();
         //todo: review here
-        if(mBluetoothClient != null && mBluetoothClient.getState() == BluetoothClient.STATE_NONE) {
+        if (mBluetoothClient != null && mBluetoothClient.getState() == BluetoothClient.STATE_NONE) {
             mBluetoothClient.connect();
             mBluetoothClient.getBluetoothBroadcastReceiver()
                     .safeRegister(this, new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED));

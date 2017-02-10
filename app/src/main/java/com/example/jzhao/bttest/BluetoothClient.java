@@ -3,10 +3,8 @@ package com.example.jzhao.bttest;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.Handler;
 import android.util.Log;
 
@@ -66,10 +64,10 @@ public class BluetoothClient {
         mHandler = handler;
         mTargetDeviceName = targetDeviceName;
         setState(STATE_NONE);
-        mBluetoothBroadcastReceiver =  new SafeBroadcastReceiver() {
+        mBluetoothBroadcastReceiver = new SafeBroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
-                if(intent.getAction() == BluetoothDevice.ACTION_ACL_DISCONNECTED){
+                if (intent.getAction() == BluetoothDevice.ACTION_ACL_DISCONNECTED) {
                     Log.d(TAG, "bluetooth disconnection detected!");
                     // todo: crash report.
                     setState(STATE_NONE);
@@ -89,11 +87,16 @@ public class BluetoothClient {
     }
 
     public synchronized void setState(int state) {
-        mState = state;
         Log.d(TAG, "setState() " + mState + " -> " + state);
-        // Give the new state to the Handler so the UI Activity can update
-        //todo: send state change massage.
-        mHandler.obtainMessage(Constants.MESSAGE_STATE_CHANGE, state).sendToTarget();
+        if (mState == STATE_CONNECTED && state != STATE_CONNECTED) {
+            // if the state was connected and it changed, notify the caller the connect was lost so that
+            // the caller may initiate connect again. we don't want to send noise to the caller because connect is an expensive call.
+            mHandler.obtainMessage(Constants.MESSAGE_CONNECTION_LOST, state).sendToTarget();
+        }
+        if (mState != STATE_CONNECTED && state == STATE_CONNECTED) {
+            mHandler.obtainMessage(Constants.MESSAGE_CONNECTED, state).sendToTarget();
+        }
+        mState = state;
     }
 
     /**
@@ -116,10 +119,13 @@ public class BluetoothClient {
             Log.w(TAG, "not paired with target device" + mTargetDeviceName);
             return false;
         }
-        disconnect();
-        // Start the thread to connect with the given device
-        mConnectThread = new ConnectThread(device);
-        mConnectThread.start();
+        if (getState() != STATE_CONNECTING) {
+            //no need to retry connect if it's already connecting
+            disconnect();
+            // Start the thread to connect with the given device
+            mConnectThread = new ConnectThread(device);
+            mConnectThread.start();
+        }
         return true;
     }
 
@@ -178,42 +184,41 @@ public class BluetoothClient {
      * with a device. it keeps trying connecting to the remote device even if it fails until it is told to stop.
      */
     private class ConnectThread extends Thread {
-        private final BluetoothSocket mmSocket;
+        //        private final BluetoothSocket mmSocket;
         private final BluetoothDevice mmDevice;
         private boolean mmStopSignal = false;
 
         public ConnectThread(BluetoothDevice device) {
             mmDevice = device;
-            BluetoothSocket tmp = null;
-            // Get a BluetoothSocket for a connection with the
-            // given BluetoothDevice
-            try {
-                tmp = device.createRfcommSocketToServiceRecord(MY_UUID_SECURE);
-            } catch (IOException e) {
-                Log.e(TAG, "attempt to connect to device failed", e);
-                disconnect();
-            }
-            mmSocket = tmp;
         }
 
         public void run() {
             Log.i(TAG, "BEGIN connecting to device:" + mmDevice.getName());
-
+            //TODO: Crash report.
             // Always cancel discovery because it will slow down a connection
             mAdapter.cancelDiscovery();
             setState(STATE_CONNECTING);
             // Make a connection to the BluetoothSocket
             while (!mmStopSignal) {
+                //creaing a new socket every time because if the socket is closed, it will fail at connect() every time,
+                //making the infinite attempt infinite failure.
+                BluetoothSocket socket = null;
                 try {
-                    // This is a blocking call and will only return on a
-                    // successful connection or an exception
                     Thread.sleep(1000);
-                    mmSocket.connect();
+                    // Get a BluetoothSocket for a connection with the
+                    // given BluetoothDevice
+                    try {
+                        socket = mmDevice.createRfcommSocketToServiceRecord(MY_UUID_SECURE);
+                    } catch (IOException e) {
+                        Log.e(TAG, "attempt to connect to device failed", e);
+                        disconnect();
+                    }
+                    socket.connect();
                 } catch (IOException e) {
                     // Close the socket
                     Log.e(TAG, "error occurred at connect ", e);
                     try {
-                        mmSocket.close();
+                        socket.close();
                     } catch (IOException e2) {
                         //TODO: crash report
                         Log.e(TAG, "unable to close socket during connection failure", e2);
@@ -221,9 +226,9 @@ public class BluetoothClient {
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
-                if (mmSocket.isConnected()) {
+                if (socket.isConnected()) {
                     // Start the startConnectedThread thread
-                    startConnectedThread(mmSocket);
+                    startConnectedThread(socket);
                     break;
                 }
             }
@@ -232,11 +237,6 @@ public class BluetoothClient {
         //signal the connecting loop to stop
         public void cancel() {
             mmStopSignal = true;
-            try {
-                mmSocket.close();
-            } catch (IOException e) {
-                Log.e(TAG, "close() socket failed", e);
-            }
         }
     }
 
