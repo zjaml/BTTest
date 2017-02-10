@@ -3,7 +3,10 @@ package com.example.jzhao.bttest;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Handler;
 import android.util.Log;
 
@@ -56,17 +59,33 @@ public class BluetoothClient {
     private ConnectedThread mConnectedThread;
     private String mTargetDeviceName;
 
-    public BluetoothClient(Context context, Handler handler, final String targetDeviceName) {
+    private SafeBroadcastReceiver mBluetoothBroadcastReceiver = null;
+
+    public BluetoothClient(Handler handler, final String targetDeviceName) {
         mAdapter = BluetoothAdapter.getDefaultAdapter();
         mHandler = handler;
         mTargetDeviceName = targetDeviceName;
         setState(STATE_NONE);
+        mBluetoothBroadcastReceiver =  new SafeBroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                if(intent.getAction() == BluetoothDevice.ACTION_ACL_DISCONNECTED){
+                    Log.d(TAG, "bluetooth disconnection detected!");
+                    // todo: crash report.
+                    setState(STATE_NONE);
+                }
+            }
+        };
     }
 
     // define and set state machine so that operations can be controlled base on state,
     // like preventing duplicated connect thread when there's already a connect thread working.
     public synchronized int getState() {
         return mState;
+    }
+
+    public SafeBroadcastReceiver getBluetoothBroadcastReceiver() {
+        return mBluetoothBroadcastReceiver;
     }
 
     public synchronized void setState(int state) {
@@ -119,6 +138,7 @@ public class BluetoothClient {
     /**
      * we don't want this method to perform simultaneously which may jam commands.
      * convert the command to byte stream, add delimiter and write to the ConnectedThread OutStream.
+     *
      * @param command command to send to device
      * @see ConnectedThread#write(byte[])
      */
@@ -161,6 +181,7 @@ public class BluetoothClient {
         private final BluetoothSocket mmSocket;
         private final BluetoothDevice mmDevice;
         private boolean mmStopSignal = false;
+
         public ConnectThread(BluetoothDevice device) {
             mmDevice = device;
             BluetoothSocket tmp = null;
@@ -186,8 +207,8 @@ public class BluetoothClient {
                 try {
                     // This is a blocking call and will only return on a
                     // successful connection or an exception
+                    Thread.sleep(1000);
                     mmSocket.connect();
-                    break;
                 } catch (IOException e) {
                     // Close the socket
                     Log.e(TAG, "error occurred at connect ", e);
@@ -197,14 +218,14 @@ public class BluetoothClient {
                         //TODO: crash report
                         Log.e(TAG, "unable to close socket during connection failure", e2);
                     }
-                    return;
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
                 }
-            }
-            if(mmSocket.isConnected()) {
-                // Start the startConnectedThread thread
-                startConnectedThread(mmSocket);
-            } else{
-                setState(STATE_NONE);
+                if (mmSocket.isConnected()) {
+                    // Start the startConnectedThread thread
+                    startConnectedThread(mmSocket);
+                    break;
+                }
             }
         }
 
@@ -256,23 +277,22 @@ public class BluetoothClient {
             while (isConnected()) {
                 try {
                     // Read from the InputStream
-                    if(mmInStream.available() > 0) {
-                        bytes = mmInStream.read(buffer);
-                        String data = new String(buffer, US_ASCII);
-                        for (char ch : data.toCharArray()) {
-                            if (ch != DELIMITER) {
-                                mmMessageBuffer.append(ch);
-                            } else {
-                                String message = mmMessageBuffer.toString();
-                                // Send the obtained message to caller
-                                mHandler.obtainMessage(Constants.MESSAGE_INCOMING_MESSAGE, message)
-                                        .sendToTarget();
-                                mmMessageBuffer = new StringBuilder();
-                            }
+                    bytes = mmInStream.read(buffer);
+                    String data = new String(buffer, US_ASCII);
+                    for (char ch : data.toCharArray()) {
+                        if (ch != DELIMITER) {
+                            mmMessageBuffer.append(ch);
+                        } else {
+                            String message = mmMessageBuffer.toString();
+                            // Send the obtained message to caller
+                            mHandler.obtainMessage(Constants.MESSAGE_INCOMING_MESSAGE, message)
+                                    .sendToTarget();
+                            mmMessageBuffer = new StringBuilder();
                         }
                     }
                 } catch (IOException e) {
                     Log.e(TAG, "disconnected", e);
+                    // this is not reliable for detecting bluetooth disconnection. Need to listen to system event!
                     disconnect();
                 }
             }
@@ -284,6 +304,7 @@ public class BluetoothClient {
 
         /**
          * Write bytes buffer to the ConnectedThread OutStream.
+         *
          * @param buffer byte array to send via BT.
          */
         public void write(byte[] buffer) {
