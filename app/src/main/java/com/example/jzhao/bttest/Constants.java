@@ -22,8 +22,7 @@ package com.example.jzhao.bttest;
 public interface Constants {
 
     // Message types sent from the BluetoothChatService Handler
-    int MESSAGE_CONNECTED = 1;
-    int MESSAGE_DISCONNECTED = 2;
-    int MESSAGE_INCOMING_MESSAGE = 3;
+    int MESSAGE_STATE_CHANGE = 1;
+    int MESSAGE_INCOMING_MESSAGE = 2;
 
 }

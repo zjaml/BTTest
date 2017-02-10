@@ -44,12 +44,12 @@ public class BluetoothClient {
             UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
     private static final String TAG = "BluetoothClient";
 
-    public static final int STATE_UNPAIRED = 0;
-    public static final int STATE_DISCONNECTED = 1;
+    public static final int STATE_NONE = 0;
+    public static final int STATE_CONNECTING = 1;
     public static final int STATE_CONNECTED = 2;
     public static final char DELIMITER = '\n';
     public static final String US_ASCII = "US-ASCII";
-
+    private int mState;
     private final BluetoothAdapter mAdapter;
     private final Handler mHandler;
     private ConnectThread mConnectThread;
@@ -60,23 +60,21 @@ public class BluetoothClient {
         mAdapter = BluetoothAdapter.getDefaultAdapter();
         mHandler = handler;
         mTargetDeviceName = targetDeviceName;
+        setState(STATE_NONE);
     }
 
-    /**
-     * Return the current connection state.
-     * TODO: can check the state when the app resumes
-     */
-    // TODO: define and set state machine so that operations can be controlled base on state,
+    // define and set state machine so that operations can be controlled base on state,
     // like preventing duplicated connect thread when there's already a connect thread working.
     public synchronized int getState() {
-        // set state to unpaired when bluetooth is not on
-        if (mAdapter.getState() != BluetoothAdapter.STATE_ON) {
-            return STATE_UNPAIRED;
-        }
-        if (mConnectedThread != null && mConnectedThread.isConnected()) {
-            return STATE_CONNECTED;
-        }
-        return STATE_DISCONNECTED;
+        return mState;
+    }
+
+    public synchronized void setState(int state) {
+        mState = state;
+        Log.d(TAG, "setState() " + mState + " -> " + state);
+        // Give the new state to the Handler so the UI Activity can update
+        //todo: send state change massage.
+        mHandler.obtainMessage(Constants.MESSAGE_STATE_CHANGE, state).sendToTarget();
     }
 
     /**
@@ -113,11 +111,9 @@ public class BluetoothClient {
         }
         if (mConnectedThread != null) {
             mConnectedThread.cancel();
-            //send disconnect message to caller, only doing it when it was connected previously, so that
-            //the caller can they try to reconnect as needed.
-            mHandler.obtainMessage(Constants.MESSAGE_DISCONNECTED).sendToTarget();
             mConnectedThread = null;
         }
+        setState(STATE_NONE);
     }
 
     /**
@@ -159,13 +155,12 @@ public class BluetoothClient {
 
     /**
      * This thread runs while attempting to make an outgoing connection
-     * with a device. It runs straight through; the connection either
-     * succeeds or fails.
+     * with a device. it keeps trying connecting to the remote device even if it fails until it is told to stop.
      */
     private class ConnectThread extends Thread {
         private final BluetoothSocket mmSocket;
         private final BluetoothDevice mmDevice;
-
+        private boolean mmStopSignal = false;
         public ConnectThread(BluetoothDevice device) {
             mmDevice = device;
             BluetoothSocket tmp = null;
@@ -185,30 +180,37 @@ public class BluetoothClient {
 
             // Always cancel discovery because it will slow down a connection
             mAdapter.cancelDiscovery();
-
+            setState(STATE_CONNECTING);
             // Make a connection to the BluetoothSocket
-            // todo: connect in a loop until it get connected
-            try {
-                // This is a blocking call and will only return on a
-                // successful connection or an exception
-                mmSocket.connect();
-            } catch (IOException e) {
-                // Close the socket
-                Log.e(TAG, "error occurred at connect ", e);
+            while (!mmStopSignal) {
                 try {
-                    mmSocket.close();
-                } catch (IOException e2) {
-                    //TODO: crash report
-                    Log.e(TAG, "unable to close socket during connection failure", e2);
+                    // This is a blocking call and will only return on a
+                    // successful connection or an exception
+                    mmSocket.connect();
+                    break;
+                } catch (IOException e) {
+                    // Close the socket
+                    Log.e(TAG, "error occurred at connect ", e);
+                    try {
+                        mmSocket.close();
+                    } catch (IOException e2) {
+                        //TODO: crash report
+                        Log.e(TAG, "unable to close socket during connection failure", e2);
+                    }
+                    return;
                 }
-                return;
             }
-            // Start the startConnectedThread thread
-            startConnectedThread(mmSocket);
+            if(mmSocket.isConnected()) {
+                // Start the startConnectedThread thread
+                startConnectedThread(mmSocket);
+            } else{
+                setState(STATE_NONE);
+            }
         }
 
         //signal the connecting loop to stop
         public void cancel() {
+            mmStopSignal = true;
             try {
                 mmSocket.close();
             } catch (IOException e) {
@@ -242,7 +244,7 @@ public class BluetoothClient {
             }
             mmInStream = tmpIn;
             mmOutStream = tmpOut;
-            mHandler.obtainMessage(Constants.MESSAGE_CONNECTED).sendToTarget();
+            setState(STATE_CONNECTED);
         }
 
         public void run() {

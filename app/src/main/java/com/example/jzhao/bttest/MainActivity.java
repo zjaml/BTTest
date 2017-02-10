@@ -38,7 +38,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private int mRetried = 0; //reset when connect succeed.
     private BluetoothClient mBluetoothClient = null;
     private final MyHandler myHandler = new MyHandler(this);
 
@@ -59,13 +58,17 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         super.onStop();
+        //important to purge mBluetoothClient here as it cannot maintain correct state while the app get into background.
+        //it must be recreated at onStart()
         mBluetoothClient.disconnect();
+        mBluetoothClient = null;
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        if(mBluetoothClient != null && mBluetoothClient.getState() != BluetoothClient.STATE_CONNECTED) {
+        //todo: review here
+        if(mBluetoothClient != null && mBluetoothClient.getState() == BluetoothClient.STATE_NONE) {
             mBluetoothClient.connect();
         }
     }
