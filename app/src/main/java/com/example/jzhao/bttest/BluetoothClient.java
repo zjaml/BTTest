@@ -40,6 +40,8 @@ import java.util.UUID;
 
 public class BluetoothClient {
     private static final UUID SPP_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+    private static final UUID MY_UUID_SECURE =
+            UUID.fromString("fa87c0d0-afac-11de-8a39-0800200c9a66");
     private static final String TAG = "BluetoothClient";
 
     public static final int STATE_UNPAIRED = 0;
@@ -168,7 +170,7 @@ public class BluetoothClient {
             // Get a BluetoothSocket for a connection with the
             // given BluetoothDevice
             try {
-                tmp = device.createRfcommSocketToServiceRecord(SPP_UUID);
+                tmp = device.createRfcommSocketToServiceRecord(MY_UUID_SECURE);
             } catch (IOException e) {
                 Log.e(TAG, "attempt to connect to device failed", e);
                 disconnect();
@@ -186,8 +188,7 @@ public class BluetoothClient {
             try {
                 // This is a blocking call and will only return on a
                 // successful connection or an exception
-                if(!mmSocket.isConnected())
-                    mmSocket.connect();
+                mmSocket.connect();
             } catch (IOException e) {
                 // Close the socket
                 Log.e(TAG, "error occurred at connect ", e);

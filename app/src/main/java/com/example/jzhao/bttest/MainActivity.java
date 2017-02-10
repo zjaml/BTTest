@@ -15,12 +15,11 @@ The target device need to be paired first, and its nickname be set as parameter 
 
 The BluetoothClient instance is created at OnCreate, at OnResume, check the connection state and try reconnect it if it is not connected.
 This activity listens to the message sent by BluetoothClient to get connect/disconnect event and get messages received from the remote device.
-When trying connect, the activity will retry connect in a interval until it get connected.
+When trying connect, the activity will retry connect in a interval until retry limit is reached.
  */
 public class MainActivity extends AppCompatActivity {
 
-    public static final String TARGET_DEVICE_NAME = "abc";
-
+    public static final String TARGET_DEVICE_NAME = "vivo X7";
     //static inner class doesn't hold an implicit reference to the outer class
     private static class MyHandler extends Handler {
         //Using a weak reference means you won't prevent garbage collection
@@ -39,6 +38,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private int mRetried = 0; //reset when connect succeed.
     private BluetoothClient mBluetoothClient = null;
     private final MyHandler myHandler = new MyHandler(this);
 
@@ -52,6 +52,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onStart() {
         super.onStart();
         mBluetoothClient = new BluetoothClient(this, myHandler, TARGET_DEVICE_NAME);
+        //will this work without retry? will the Socket.connect block on when remote device is not in range?
         mBluetoothClient.connect();
     }
 
@@ -64,9 +65,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if(mBluetoothClient != null && mBluetoothClient.getState() != BluetoothClient.STATE_CONNECTED) {
-            mBluetoothClient.connect();
-        }
+//        if(mBluetoothClient != null && mBluetoothClient.getState() != BluetoothClient.STATE_CONNECTED) {
+//            mBluetoothClient.connect();
+//        }
     }
 
 
