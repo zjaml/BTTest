@@ -15,6 +15,7 @@ Test the behaviour when target arduino.
 ## Connection management:
 * keep trying connecting to the target device until connection is made.This suvives events like reboot of the target device, wireless interference, and the device going out of range. Once the target device is ready again, with BluetoothClient, the app can automatically reconnect with the target device.
 * It notifies the caller about bluetooth disconnection happens. The caller can then inform the BluetoothClient to connect again.
+
 ## Communication
 * Send command string to the target device; auto add new line '\n' as delimiter.
 * Receive response message from the target device; auto seperate messages with '\n' as delimiter.
