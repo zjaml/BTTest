@@ -208,7 +208,7 @@ public class BluetoothClient {
                     // Get a BluetoothSocket for a connection with the
                     // given BluetoothDevice
                     try {
-                        socket = mmDevice.createRfcommSocketToServiceRecord(MY_UUID_SECURE);
+                        socket = mmDevice.createRfcommSocketToServiceRecord(SPP_UUID);
                     } catch (IOException e) {
                         Log.e(TAG, "attempt to connect to device failed", e);
                         disconnect();
